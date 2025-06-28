@@ -45,12 +45,18 @@ func (a AmazonLinux2023) InstanceType(region string, instanceSize e2e.InstanceSi
 	return getInstanceTypeFromRegionAndArch(region, a.architecture, instanceSize, computeType)
 }
 
-func (a AmazonLinux2023) AMIName(ctx context.Context, awsConfig aws.Config) (string, error) {
+func (a AmazonLinux2023) AMIName(ctx context.Context, awsConfig aws.Config, _ string) (string, error) {
 	amiId, err := getAmiIDFromSSM(ctx, ssm.NewFromConfig(awsConfig), "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-"+a.amiArchitecture)
 	return *amiId, err
 }
 
 func (a AmazonLinux2023) BuildUserData(userDataInput e2e.UserDataInput) ([]byte, error) {
+	nodeadmConfigYaml, err := generateNodeadmConfigYaml(userDataInput.NodeadmConfig)
+	if err != nil {
+		return nil, err
+	}
+	userDataInput.NodeadmConfigYaml = nodeadmConfigYaml
+
 	if err := populateBaseScripts(&userDataInput); err != nil {
 		return nil, err
 	}

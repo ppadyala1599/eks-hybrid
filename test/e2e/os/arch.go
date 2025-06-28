@@ -9,7 +9,9 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	"sigs.k8s.io/yaml"
 
+	"github.com/aws/eks-hybrid/internal/api"
 	"github.com/aws/eks-hybrid/test/e2e"
 )
 
@@ -52,7 +54,7 @@ var gpuInstanceSizeToType = map[architecture]map[e2e.InstanceSize]string{
 var nodeAdmInitScript []byte
 
 //go:embed testdata/log-collector.sh
-var logCollectorScript []byte
+var LogCollectorScript []byte
 
 //go:embed testdata/nodeadm-wrapper.sh
 var nodeadmWrapperScript []byte
@@ -72,7 +74,7 @@ func (a architecture) arm() bool {
 }
 
 func populateBaseScripts(userDataInput *e2e.UserDataInput) error {
-	logCollector, err := executeTemplate(logCollectorScript, userDataInput)
+	logCollector, err := executeTemplate(LogCollectorScript, userDataInput)
 	if err != nil {
 		return fmt.Errorf("generating log collector script: %w", err)
 	}
@@ -136,4 +138,13 @@ func getInstanceTypeFromRegionAndArch(_ string, arch architecture, instanceSize 
 		panic(fmt.Errorf("unknown instance size %d for architecture %s", instanceSize, arch))
 	}
 	return instanceType
+}
+
+func generateNodeadmConfigYaml(nodeadmConfig *api.NodeConfig) (string, error) {
+	nodeadmConfigYaml, err := yaml.Marshal(nodeadmConfig)
+	if err != nil {
+		return "", fmt.Errorf("marshalling nodeadm config to YAML: %w", err)
+	}
+
+	return string(nodeadmConfigYaml), nil
 }

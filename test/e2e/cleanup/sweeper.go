@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials/processcreds"
 	"github.com/aws/aws-sdk-go-v2/service/cloudformation"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -190,10 +191,27 @@ func (c *Sweeper) Run(ctx context.Context, input SweeperInput) error {
 
 	allErrors := []error{}
 	for _, cleanup := range cleanups {
-		if err := cleanup.Cleanup(ctx, filterInput); err != nil {
-			c.logger.Error(err, cleanup.FailureMessage)
-			allErrors = append(allErrors, fmt.Errorf("%s: %w", cleanup.FailureMessage, err))
+		err := cleanup.Cleanup(ctx, filterInput)
+		if err == nil {
+			continue
 		}
+		// if the context is canceled or the deadline is exceeded, we want to stop the cleanup
+		// and return the error
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			allErrors = append(allErrors, err)
+			break
+		}
+
+		// if the error is a processcreds.ProviderError, the user needs to refresh their credentials
+		var providerErr *processcreds.ProviderError
+		if errors.As(err, &providerErr) {
+			allErrors = append(allErrors, err)
+			break
+		}
+
+		c.logger.Error(err, cleanup.FailureMessage)
+		allErrors = append(allErrors, fmt.Errorf("%s: %w", cleanup.FailureMessage, err))
+
 	}
 
 	if len(allErrors) > 0 {

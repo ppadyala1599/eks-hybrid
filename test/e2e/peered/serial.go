@@ -10,7 +10,6 @@ import (
 	"github.com/onsi/gomega"
 
 	"github.com/aws/eks-hybrid/test/e2e"
-	"github.com/aws/eks-hybrid/test/e2e/ec2"
 	"github.com/aws/eks-hybrid/test/e2e/ssh"
 )
 
@@ -30,7 +29,7 @@ type SerialOutputBlock struct {
 type SerialOutputConfig struct {
 	By         func(description string, callback ...func())
 	PeeredNode *Node
-	Instance   ec2.Instance
+	Instance   PeeredInstance
 	TestLogger e2e.PausableLogger
 	OutputFile string
 	Output     io.Writer // Writer to output serial console to, defaults to os.Stdout if nil

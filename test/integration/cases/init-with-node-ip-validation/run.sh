@@ -5,13 +5,14 @@ set -o nounset
 set -o pipefail
 
 source /helpers.sh
+source /test-constants.sh
 
 mock::aws
 
 aws eks create-cluster \
     --name test-cluster \
     --region us-west-2 \
-    --kubernetes-version 1.30 \
+    --kubernetes-version $CURRENT_VERSION \
     --role-arn arn:aws:iam::123456789010:role/mockHybridNodeRole \
     --resources-vpc-config "subnetIds=subnet-1,subnet-2,endpointPublicAccess=true" \
     --remote-network-config '{"remoteNodeNetworks":[{"cidrs":["172.16.0.0/24"]}],"remotePodNetworks":[{"cidrs":["10.0.0.0/8"]}]}'
@@ -22,7 +23,7 @@ mkdir -p /etc/iam/pki
 touch  /etc/iam/pki/server.pem
 touch  /etc/iam/pki/server.key
 
-nodeadm install 1.30 --credential-provider iam-ra
+nodeadm install $CURRENT_VERSION --credential-provider iam-ra
 
 mock::aws_signing_helper
 

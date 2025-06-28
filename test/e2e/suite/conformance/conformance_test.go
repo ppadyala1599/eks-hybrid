@@ -69,7 +69,7 @@ var _ = SynchronizedBeforeSuite(
 			nodesToCreate = append(nodesToCreate, suite.NodeCreate{
 				OS:           os,
 				Provider:     provider,
-				InstanceName: test.InstanceName("conformance", os, provider),
+				InstanceName: test.InstanceName("conformance", os.Name(), string(provider.Name())),
 				InstanceSize: e2e.XLarge,
 				NodeName:     "conformance" + "-node-" + string(provider.Name()) + "-" + os.Name(),
 			})

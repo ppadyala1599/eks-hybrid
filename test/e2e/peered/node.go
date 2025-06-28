@@ -17,7 +17,7 @@ import (
 	"github.com/go-logr/logr"
 	gssh "golang.org/x/crypto/ssh"
 	clientgo "k8s.io/client-go/kubernetes"
-	"sigs.k8s.io/yaml"
+	"k8s.io/client-go/rest"
 
 	"github.com/aws/eks-hybrid/test/e2e"
 	"github.com/aws/eks-hybrid/test/e2e/cleanup"
@@ -25,7 +25,6 @@ import (
 	"github.com/aws/eks-hybrid/test/e2e/constants"
 	"github.com/aws/eks-hybrid/test/e2e/ec2"
 	"github.com/aws/eks-hybrid/test/e2e/kubernetes"
-	"github.com/aws/eks-hybrid/test/e2e/nodeadm"
 	"github.com/aws/eks-hybrid/test/e2e/os"
 	"github.com/aws/eks-hybrid/test/e2e/s3"
 	"github.com/aws/eks-hybrid/test/e2e/ssh"
@@ -56,29 +55,30 @@ type NodeSpec struct {
 }
 
 type NodeCreate struct {
-	AWS     aws.Config
-	Cluster *HybridCluster
-	EC2     *ec2sdk.Client
-	SSM     *ssm.Client
-	Logger  logr.Logger
+	AWS                 aws.Config
+	Cluster             *HybridCluster
+	EC2                 *ec2sdk.Client
+	SSM                 *ssm.Client
+	K8sClientConfig     *rest.Config
+	Logger              logr.Logger
+	RemoteCommandRunner commands.RemoteCommandRunner
 
 	SetRootPassword bool
 	NodeadmURLs     e2e.NodeadmURLs
 	PublicKey       string
 }
 
-// PeerdNode represents a Hybrid node running as an EC2 instance in a peered VPC
+// PeeredInstance represents a Hybrid node running as an EC2 instance in a peered VPC
 // The Name is the name of the kubenretes node object
 // The Instance is the underlying EC2 instance
-type PeerdNode struct {
-	Instance ec2.Instance
-	Name     string
+type PeeredInstance struct {
+	ec2.Instance
+	Name string
 }
 
 // Create spins up an EC2 instance with the proper user data to join as a Hybrid node to the cluster.
-func (c NodeCreate) Create(ctx context.Context, spec *NodeSpec) (PeerdNode, error) {
+func (c NodeCreate) Create(ctx context.Context, spec *NodeSpec) (PeeredInstance, error) {
 	nodeSpec := e2e.NodeSpec{
-		OS:   spec.OS,
 		Name: spec.NodeName,
 		Cluster: &e2e.Cluster{
 			Name:   c.Cluster.Name,
@@ -89,21 +89,16 @@ func (c NodeCreate) Create(ctx context.Context, spec *NodeSpec) (PeerdNode, erro
 
 	files, err := spec.Provider.FilesForNode(nodeSpec)
 	if err != nil {
-		return PeerdNode{}, err
+		return PeeredInstance{}, err
 	}
 
 	nodeadmConfig, err := spec.Provider.NodeadmConfig(ctx, nodeSpec)
 	if err != nil {
-		return PeerdNode{}, fmt.Errorf("expected to build nodeconfig: %w", err)
+		return PeeredInstance{}, fmt.Errorf("expected to build nodeconfig: %w", err)
 	}
 
 	nodeadmConfig.Spec.Kubelet.Flags = []string{
 		fmt.Sprintf("--node-labels=%s=%s", constants.TestInstanceNameKubernetesLabel, spec.NodeName),
-	}
-
-	nodeadmConfigYaml, err := yaml.Marshal(&nodeadmConfig)
-	if err != nil {
-		return PeerdNode{}, fmt.Errorf("expected to successfully marshal nodeadm config to YAML: %w", err)
 	}
 
 	var rootPasswordHash string
@@ -111,7 +106,7 @@ func (c NodeCreate) Create(ctx context.Context, spec *NodeSpec) (PeerdNode, erro
 		var rootPassword string
 		rootPassword, rootPasswordHash, err = os.GenerateOSPassword()
 		if err != nil {
-			return PeerdNode{}, fmt.Errorf("expected to successfully generate root password: %w", err)
+			return PeeredInstance{}, fmt.Errorf("expected to successfully generate root password: %w", err)
 		}
 		c.Logger.Info(fmt.Sprintf("Instance Root Password: %s", rootPassword))
 	}
@@ -120,20 +115,25 @@ func (c NodeCreate) Create(ctx context.Context, spec *NodeSpec) (PeerdNode, erro
 		EKSEndpoint:       spec.EKSEndpoint,
 		KubernetesVersion: spec.NodeK8sVersion,
 		NodeadmUrls:       c.NodeadmURLs,
-		NodeadmConfigYaml: string(nodeadmConfigYaml),
+		NodeadmConfig:     nodeadmConfig,
 		Provider:          string(spec.Provider.Name()),
 		RootPasswordHash:  rootPasswordHash,
 		Region:            c.Cluster.Region,
 		Files:             files,
 		PublicKey:         c.PublicKey,
+
+		KubernetesAPIServer: c.K8sClientConfig.Host,
+		HostName:            nodeSpec.Name,
+		ClusterName:         c.Cluster.Name,
+		ClusterCert:         c.K8sClientConfig.CAData,
 	})
 	if err != nil {
-		return PeerdNode{}, fmt.Errorf("expected to successfully build user data: %w", err)
+		return PeeredInstance{}, fmt.Errorf("expected to successfully build user data: %w", err)
 	}
 
-	amiId, err := spec.OS.AMIName(ctx, c.AWS)
+	amiId, err := spec.OS.AMIName(ctx, c.AWS, spec.NodeK8sVersion)
 	if err != nil {
-		return PeerdNode{}, fmt.Errorf("expected to successfully retrieve ami id: %w", err)
+		return PeeredInstance{}, fmt.Errorf("expected to successfully retrieve ami id: %w", err)
 	}
 
 	instanceType := spec.InstanceType
@@ -151,26 +151,17 @@ func (c NodeCreate) Create(ctx context.Context, spec *NodeSpec) (PeerdNode, erro
 		SecurityGroupID:    c.Cluster.SecurityGroupID,
 		UserData:           userdata,
 		InstanceProfileARN: spec.InstanceProfileARN,
+		OS:                 spec.OS.Name(),
 	}
 
 	c.Logger.Info("Creating a hybrid EC2 Instance...")
 	instance, err := ec2Input.Create(ctx, c.EC2, c.SSM)
 	if err != nil {
-		return PeerdNode{}, fmt.Errorf("EC2 Instance should have been created successfully: %w", err)
-	}
-
-	c.Logger.Info("Waiting for EC2 Instance to be running...", "instanceID", instance.ID)
-	if err := ec2.WaitForEC2InstanceRunning(ctx, c.EC2, instance.ID); err != nil {
-		return PeerdNode{}, fmt.Errorf("waiting for EC2 instance for node to be running: %w", err)
-	}
-
-	c.Logger.Info("Disabling source/destination check...", "instanceID", instance.ID)
-	if err := ec2.DisableSourceDestCheck(ctx, c.EC2, instance.ID); err != nil {
-		return PeerdNode{}, err
+		return PeeredInstance{}, fmt.Errorf("EC2 Instance should have been created successfully: %w", err)
 	}
 
 	c.Logger.Info("A Hybrid EC2 instace is created", "instanceID", instance.ID)
-	return PeerdNode{
+	return PeeredInstance{
 		Instance: instance,
 		Name:     spec.NodeName,
 	}, nil
@@ -237,12 +228,12 @@ func generateKeyPair() ([]byte, []byte, error) {
 }
 
 type NodeCleanup struct {
-	SSM                 *ssm.Client
-	S3                  *s3sdk.Client
-	EC2                 *ec2sdk.Client
-	K8s                 clientgo.Interface
-	Logger              logr.Logger
-	RemoteCommandRunner commands.RemoteCommandRunner
+	SSM          *ssm.Client
+	S3           *s3sdk.Client
+	EC2          *ec2sdk.Client
+	K8s          clientgo.Interface
+	Logger       logr.Logger
+	LogCollector os.NodeLogCollector
 
 	LogsBucket string
 	Cluster    *HybridCluster
@@ -285,32 +276,32 @@ func (c *NodeCleanup) CleanupSSMActivation(ctx context.Context, nodeName, cluste
 }
 
 // Cleanup collects logs and deletes the EC2 instance and Node object.
-func (c *NodeCleanup) Cleanup(ctx context.Context, node PeerdNode) error {
+func (c *NodeCleanup) Cleanup(ctx context.Context, peeredInstance PeeredInstance) error {
 	logCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	err := c.collectLogs(logCtx, constants.LogCollectorBundleFileName, node.Instance)
+	err := c.collectLogs(logCtx, constants.LogCollectorBundleFileName, peeredInstance)
 	if err != nil {
 		c.Logger.Error(err, "issue collecting logs")
-		if err := ec2.LogEC2InstanceDescribe(ctx, c.EC2, node.Instance.ID, c.Logger); err != nil {
+		if err := ec2.LogEC2InstanceDescribe(ctx, c.EC2, peeredInstance.ID, c.Logger); err != nil {
 			c.Logger.Error(err, "describing instance")
 		}
 	}
 	if c.SkipDelete {
-		c.Logger.Info("Skipping EC2 Instance deletion", "instanceID", node.Instance.ID)
+		c.Logger.Info("Skipping EC2 Instance deletion", "instanceID", peeredInstance.ID)
 		return nil
 	}
 
-	if err := c.NodeInfrastructureCleaner(node).Cleanup(ctx); err != nil {
+	if err := c.NodeInfrastructureCleaner(peeredInstance).Cleanup(ctx); err != nil {
 		return err
 	}
 
-	c.Logger.Info("Deleting EC2 Instance", "instanceID", node.Instance.ID)
-	if err := ec2.DeleteEC2Instance(ctx, c.EC2, node.Instance.ID); err != nil {
+	c.Logger.Info("Deleting EC2 Instance", "instanceID", peeredInstance.ID)
+	if err := ec2.DeleteEC2Instance(ctx, c.EC2, peeredInstance.ID); err != nil {
 		return fmt.Errorf("deleting EC2 Instance: %w", err)
 	}
-	c.Logger.Info("Successfully deleted EC2 Instance", "instanceID", node.Instance.ID)
-	if err := kubernetes.EnsureNodeWithE2ELabelIsDeleted(ctx, c.K8s, node.Name); err != nil {
-		return fmt.Errorf("deleting node for instance %s: %w", node.Instance.ID, err)
+	c.Logger.Info("Successfully deleted EC2 Instance", "instanceID", peeredInstance.ID)
+	if err := kubernetes.EnsureNodeWithE2ELabelIsDeleted(ctx, c.K8s, peeredInstance.Name); err != nil {
+		return fmt.Errorf("deleting node for instance %s: %w", peeredInstance.ID, err)
 	}
 
 	return nil
@@ -324,12 +315,12 @@ type NodeInfrastructureCleaner struct {
 	InstanceId string
 }
 
-func (c *NodeCleanup) NodeInfrastructureCleaner(node PeerdNode) *NodeInfrastructureCleaner {
+func (c *NodeCleanup) NodeInfrastructureCleaner(peeredInstance PeeredInstance) *NodeInfrastructureCleaner {
 	return &NodeInfrastructureCleaner{
 		EC2:        c.EC2,
 		Logger:     c.Logger,
 		SubnetID:   c.Cluster.SubnetID,
-		InstanceId: node.Instance.ID,
+		InstanceId: peeredInstance.ID,
 	}
 }
 
@@ -350,16 +341,16 @@ func (c NodeCleanup) logsPrefix(instanceName string) string {
 	return fmt.Sprintf("%s/%s/%s", constants.TestS3LogsFolder, c.Cluster.Name, instanceName)
 }
 
-func (c NodeCleanup) collectLogs(ctx context.Context, bundleName string, instance ec2.Instance) error {
+func (c NodeCleanup) collectLogs(ctx context.Context, bundleName string, peeredInstance PeeredInstance) error {
 	if c.LogsBucket == "" {
 		return nil
 	}
-	key := fmt.Sprintf("%s/%s", c.logsPrefix(instance.Name), bundleName)
+	key := fmt.Sprintf("%s/%s", c.logsPrefix(peeredInstance.Name), bundleName)
 	url, err := s3.GeneratePutLogsPreSignedURL(ctx, c.S3, c.LogsBucket, key, 5*time.Minute)
 	if err != nil {
 		return err
 	}
-	err = nodeadm.RunLogCollector(ctx, c.RemoteCommandRunner, instance.IP, url)
+	err = c.LogCollector.Run(ctx, peeredInstance.IP, url)
 	if err != nil {
 		return err
 	}

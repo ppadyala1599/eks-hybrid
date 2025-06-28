@@ -6,7 +6,7 @@ import (
 	"os"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2v2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 	s3sdk "github.com/aws/aws-sdk-go-v2/service/s3"
 	ssmsdk "github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/go-logr/logr"
@@ -20,6 +20,7 @@ import (
 	"github.com/aws/eks-hybrid/test/e2e"
 	"github.com/aws/eks-hybrid/test/e2e/cluster"
 	"github.com/aws/eks-hybrid/test/e2e/credentials"
+	"github.com/aws/eks-hybrid/test/e2e/ec2"
 	"github.com/aws/eks-hybrid/test/e2e/kubernetes"
 	osystem "github.com/aws/eks-hybrid/test/e2e/os"
 	"github.com/aws/eks-hybrid/test/e2e/peered"
@@ -49,7 +50,7 @@ func NewCreateCommand() cli.Command {
 	createCmd.AddPositionalValue(&cmd.instanceName, "INSTANCE_NAME", 1, true, "Name of the instance to create.")
 	createCmd.String(&cmd.configFile, "f", "config-file", "Path tests config file.")
 	createCmd.String(&cmd.credsProvider, "c", "creds-provider", "Credentials provider to use (iam-ra, ssm).")
-	createCmd.String(&cmd.os, "o", "os", "OS to use (al23, ubuntu2004, ubuntu2204, ubuntu2404, rhel8, rhel9).")
+	createCmd.String(&cmd.os, "o", "os", "OS to use (al23, ubuntu2004, ubuntu2204, ubuntu2404, rhel8, rhel9, bottlerocket).")
 	createCmd.String(&cmd.arch, "a", "arch", "Architecture to use (amd64, arm64).")
 	createCmd.String(&cmd.instanceSize, "s", "instance-size", "Instance size to use (Large, XLarge).")
 	createCmd.String(&cmd.instanceType, "t", "instance-type", "Instance type to use (t3.large, g4dn.xlarge, etc). If provided, instance size would be ignored.")
@@ -82,7 +83,7 @@ func (c *create) Run(log *zap.Logger, opts *cli.GlobalOptions) error {
 	}
 
 	eksClient := e2e.NewEKSClient(aws, config.Endpoint)
-	ec2Client := ec2.NewFromConfig(aws)
+	ec2Client := ec2v2.NewFromConfig(aws)
 	ssmClient := ssmsdk.NewFromConfig(aws)
 	s3Client := s3sdk.NewFromConfig(aws)
 
@@ -119,6 +120,8 @@ func (c *create) Run(log *zap.Logger, opts *cli.GlobalOptions) error {
 
 		NodeadmURLs: *urls,
 		PublicKey:   infra.NodesPublicSSHKey,
+
+		K8sClientConfig: clientConfig,
 	}
 
 	nodeOS, err := buildOS(c.os, c.arch)
@@ -148,7 +151,7 @@ func (c *create) Run(log *zap.Logger, opts *cli.GlobalOptions) error {
 		instanceSize = e2e.XLarge
 	}
 
-	peerdNode, err := node.Create(ctx, &peered.NodeSpec{
+	peeredInstance, err := node.Create(ctx, &peered.NodeSpec{
 		InstanceName:   c.instanceName,
 		InstanceSize:   instanceSize,
 		InstanceType:   c.instanceType,
@@ -161,10 +164,15 @@ func (c *create) Run(log *zap.Logger, opts *cli.GlobalOptions) error {
 		return err
 	}
 
-	logger.Info("Node created", "instanceID", peerdNode.Instance.ID)
+	logger.Info("Node created", "instanceID", peeredInstance.ID)
+
+	logger.Info("Waiting for EC2 Instance to be running...", "instanceID", peeredInstance.ID)
+	if err := ec2.WaitForEC2InstanceRunning(ctx, ec2Client, peeredInstance.ID); err != nil {
+		return fmt.Errorf("waiting for EC2 instance for node to be running: %w", err)
+	}
 
 	logger.Info("Connecting to the node serial console...")
-	serial, err := node.SerialConsole(ctx, peerdNode.Instance.ID)
+	serial, err := node.SerialConsole(ctx, peeredInstance.ID)
 	if err != nil {
 		return fmt.Errorf("preparing EC2 for serial connection: %w", err)
 	}
@@ -184,8 +192,8 @@ func (c *create) Run(log *zap.Logger, opts *cli.GlobalOptions) error {
 	verifyNode := kubernetes.VerifyNode{
 		K8s:      k8s,
 		Logger:   logr.Discard(),
-		NodeName: peerdNode.Name,
-		NodeIP:   peerdNode.Instance.IP,
+		NodeName: peeredInstance.Name,
+		NodeIP:   peeredInstance.IP,
 	}
 	vn, err := verifyNode.WaitForNodeReady(ctx)
 	if err != nil {
@@ -205,7 +213,7 @@ func (c *create) Run(log *zap.Logger, opts *cli.GlobalOptions) error {
 		Cluster: cluster,
 	}
 
-	if err := network.CreateRoutesForNode(ctx, &peerdNode); err != nil {
+	if err := network.CreateRoutesForNode(ctx, &peeredInstance); err != nil {
 		return fmt.Errorf("creating routes for node: %w", err)
 	}
 
@@ -258,5 +266,9 @@ var oses = map[string]map[string]func() e2e.NodeadmOS{
 		"arm64": func() e2e.NodeadmOS {
 			return osystem.NewRedHat9ARM(os.Getenv("RHEL_USERNAME"), os.Getenv("RHEL_PASSWORD"))
 		},
+	},
+	"bottlerocket": {
+		"amd64": func() e2e.NodeadmOS { return osystem.NewBottleRocket() },
+		"arm64": func() e2e.NodeadmOS { return osystem.NewBottleRocketARM() },
 	},
 }

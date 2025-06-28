@@ -5,6 +5,7 @@ set -o nounset
 set -o pipefail
 
 source /helpers.sh
+source /test-constants.sh
 
 mock::aws
 wait::dbus-ready
@@ -13,7 +14,7 @@ wait::dbus-ready
 dnf remove -y containerd
 
 # Install a version to test uninstall
-nodeadm install 1.30 --credential-provider ssm
+nodeadm install $CURRENT_VERSION --credential-provider ssm
 
 # Create some test files in directories that should be cleaned up by force
 mkdir -p /var/lib/kubelet/test
@@ -38,7 +39,7 @@ assert::path-exists /var/lib/cni/test/file
 assert::path-exists /etc/cni/net.d/test/file
 
 # Install again to test force uninstall
-nodeadm install 1.30 --credential-provider ssm
+nodeadm install $CURRENT_VERSION --credential-provider ssm
 
 # Recreate test files
 mkdir -p /var/lib/kubelet/test

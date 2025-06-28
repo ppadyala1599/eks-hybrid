@@ -1,6 +1,7 @@
 package suite
 
 import (
+	certmanagerclientset "github.com/cert-manager/cert-manager/pkg/client/clientset/versioned"
 	metricsv1beta1 "k8s.io/metrics/pkg/client/clientset/versioned"
 
 	"github.com/aws/eks-hybrid/test/e2e/addon"
@@ -15,7 +16,7 @@ type AddonEc2Test struct {
 
 // NewNodeMonitoringAgentTest creates a new NodeMonitoringAgentTest
 func (a *AddonEc2Test) NewNodeMonitoringAgentTest() *addon.NodeMonitoringAgentTest {
-	commandRunner := ssm.NewSSHOnSSMCommandRunner(a.SSMClient, a.JumpboxInstanceId, a.Logger)
+	commandRunner := ssm.NewStandardLinuxSSHOnSSMCommandRunner(a.SSMClient, a.JumpboxInstanceId, a.Logger)
 	return &addon.NodeMonitoringAgentTest{
 		Cluster:       a.Cluster.Name,
 		K8S:           a.k8sClient,
@@ -81,7 +82,7 @@ func (a *AddonEc2Test) NewPrometheusNodeExporterTest() *addon.PrometheusNodeExpo
 
 // NewNvidiaDevicePluginTest creates a new NvidiaDevicePluginTest
 func (a *AddonEc2Test) NewNvidiaDevicePluginTest(nodeName string) *addon.NvidiaDevicePluginTest {
-	commandRunner := ssm.NewSSHOnSSMCommandRunner(a.SSMClient, a.JumpboxInstanceId, a.Logger)
+	commandRunner := ssm.NewStandardLinuxSSHOnSSMCommandRunner(a.SSMClient, a.JumpboxInstanceId, a.Logger)
 	return &addon.NvidiaDevicePluginTest{
 		Cluster:       a.Cluster.Name,
 		K8S:           a.k8sClient,
@@ -90,5 +91,23 @@ func (a *AddonEc2Test) NewNvidiaDevicePluginTest(nodeName string) *addon.NvidiaD
 		Logger:        a.Logger,
 		CommandRunner: commandRunner,
 		NodeName:      nodeName,
+	}
+}
+
+// NewCertManagerTest creates a new CertManagerTest
+func (a *AddonEc2Test) NewCertManagerTest() *addon.CertManagerTest {
+	// Create cert-manager client
+	certClient, err := certmanagerclientset.NewForConfig(a.K8sClientConfig)
+	if err != nil {
+		a.Logger.Error(err, "Failed to create cert-manager client")
+	}
+
+	return &addon.CertManagerTest{
+		Cluster:    a.Cluster.Name,
+		K8S:        a.k8sClient,
+		EKSClient:  a.eksClient,
+		K8SConfig:  a.K8sClientConfig,
+		Logger:     a.Logger,
+		CertClient: certClient,
 	}
 }

@@ -54,16 +54,20 @@ func (c *CFNStackCleanup) DeleteStack(ctx context.Context, stackName string) err
 	// we retry to handle the case where the stack is in a failed state
 	// and we need to force delete it
 	for range 3 {
+		// wait for any pending stack operations to stablize before triggering the delete
+		// This will cover pre-existing in-progress operations which would block the deletion as well as waiting after triggering the delete
+		if err := cfn.WaitForStackOperation(ctx, c.cfnClient, stackName, stackRetryDelay, stackDeletionTimeout); err != nil {
+			c.logger.Error(err, "failed while waiting for stack operation to stabilize, proceeding with deletion", "stackName", stackName)
+		}
 		describeStackInput := &cloudformation.DescribeStacksInput{
 			StackName: aws.String(stackName),
 		}
 		stackOutput, err := c.cfnClient.DescribeStacks(ctx, describeStackInput)
 		if err != nil && errors.IsCFNStackNotFound(err) {
-			c.logger.Info("Stack already deleted", "stack", stackName)
 			return nil
 		}
 		if err != nil {
-			return fmt.Errorf("deleting hybrid nodes cfn stack: %w", err)
+			return fmt.Errorf("describing hybrid nodes cfn stack before deletion: %w", err)
 		}
 
 		input := &cloudformation.DeleteStackInput{
@@ -78,19 +82,12 @@ func (c *CFNStackCleanup) DeleteStack(ctx context.Context, stackName string) err
 		c.logger.Info("Deleting hybrid nodes cfn stack with deletion mode", "stackName", stackName, "deletionMode", input.DeletionMode)
 		_, err = c.cfnClient.DeleteStack(ctx, input)
 		if err != nil && errors.IsCFNStackNotFound(err) {
-			c.logger.Info("Stack already deleted", "stack", stackName)
 			return nil
 		}
 		if err != nil {
 			return fmt.Errorf("deleting hybrid nodes cfn stack: %w", err)
 		}
 
-		if err := cfn.WaitForStackOperation(ctx, c.cfnClient, stackName, stackRetryDelay, stackDeletionTimeout); err != nil {
-			c.logger.Error(err, "Retrying delete of cfn stack", "stackName", stackName)
-			continue
-		}
-
-		return nil
 	}
 	return fmt.Errorf("failed to delete hybrid nodes cfn stack: %s", stackName)
 }

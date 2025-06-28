@@ -24,6 +24,7 @@ import (
 	"github.com/aws/eks-hybrid/test/e2e/cleanup"
 	"github.com/aws/eks-hybrid/test/e2e/constants"
 	e2eErrors "github.com/aws/eks-hybrid/test/e2e/errors"
+	"github.com/aws/eks-hybrid/test/e2e/os"
 	"github.com/aws/eks-hybrid/test/e2e/peered"
 	"github.com/aws/eks-hybrid/test/e2e/securitygroup"
 	e2eSSM "github.com/aws/eks-hybrid/test/e2e/ssm"
@@ -178,6 +179,15 @@ func (s *stack) prepareStackParameters(test TestResources, eks EKSConfig) []cfnT
 			ParameterValue: aws.String(eks.PodIdentitySP),
 		},
 	}
+
+	// need to replace the ${foo} with ${!foo} otherwise cfn tries to resolve it
+	// and indent the script to create a properly formated cloud-init
+	logCollectorScript := strings.ReplaceAll(string(os.LogCollectorScript), "${", "${!")
+	logCollectorScript = strings.ReplaceAll(logCollectorScript, "\n", "\n"+strings.Repeat(" ", 6))
+	params = append(params, cfnTypes.Parameter{
+		ParameterKey:   aws.String("LogCollectorScript"),
+		ParameterValue: aws.String(logCollectorScript),
+	})
 
 	// Add addon parameters
 	ingressConfig := securitygroup.DefaultIngress()
@@ -414,4 +424,36 @@ func replaceCreationTimeParameter(existingParams, newParams []cfnTypes.Parameter
 		}
 	}
 	return newParams
+}
+
+func ensureAllStackOutputsNonEmpty(stackOut *resourcesStackOutput) error {
+	var missing []string
+
+	if stackOut.clusterRole == "" {
+		missing = append(missing, "ClusterRole")
+	}
+	if stackOut.clusterVpcConfig.vpcID == "" {
+		missing = append(missing, "ClusterVPC")
+	}
+	if stackOut.clusterVpcConfig.publicSubnet == "" {
+		missing = append(missing, "ClusterVPCPublicSubnet")
+	}
+	if stackOut.clusterVpcConfig.privateSubnet == "" {
+		missing = append(missing, "ClusterVPCPrivateSubnet")
+	}
+	if stackOut.clusterVpcConfig.securityGroup == "" {
+		missing = append(missing, "ClusterSecurityGroup")
+	}
+	if stackOut.podIdentity.roleArn == "" {
+		missing = append(missing, "PodIdentityAssociationRoleARN")
+	}
+	if stackOut.podIdentity.s3Bucket == "" {
+		missing = append(missing, "PodIdentityS3BucketName")
+	}
+
+	if len(missing) > 0 {
+		return fmt.Errorf("missing required CloudFormation outputs after stack deployment: %v", missing)
+	}
+
+	return nil
 }

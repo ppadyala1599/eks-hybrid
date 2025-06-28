@@ -488,6 +488,9 @@ func (v *VPCCleaner) ListTransitGateways(ctx context.Context, input FilterInput)
 		}
 
 		for _, tgw := range resp.TransitGateways {
+			if tgw.State == types.TransitGatewayStateDeleted || tgw.State == types.TransitGatewayStateDeleting {
+				continue
+			}
 			creationTime, err := creationTimeFromTags(tgw.Tags)
 			if err != nil {
 				return nil, fmt.Errorf("getting creation time from tags: %w", err)

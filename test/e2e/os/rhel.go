@@ -71,13 +71,19 @@ func (r RedHat8) InstanceType(region string, instanceSize e2e.InstanceSize, comp
 	return getInstanceTypeFromRegionAndArch(region, r.architecture, instanceSize, computeType)
 }
 
-func (r RedHat8) AMIName(ctx context.Context, awsConfig aws.Config) (string, error) {
+func (r RedHat8) AMIName(ctx context.Context, awsConfig aws.Config, _ string) (string, error) {
 	// there is no rhel ssm parameter
 	// aws ec2 describe-images --owners 309956199498 --query 'sort_by(Images, &CreationDate)[-1].[ImageId]' --filters "Name=name,Values=RHEL-8*" "Name=architecture,Values=x86_64" --region us-west-2
 	return findLatestImage(ctx, ec2.NewFromConfig(awsConfig), "RHEL-8*", r.amiArchitecture)
 }
 
 func (r RedHat8) BuildUserData(userDataInput e2e.UserDataInput) ([]byte, error) {
+	nodeadmConfigYaml, err := generateNodeadmConfigYaml(userDataInput.NodeadmConfig)
+	if err != nil {
+		return nil, err
+	}
+	userDataInput.NodeadmConfigYaml = nodeadmConfigYaml
+
 	if err := populateBaseScripts(&userDataInput); err != nil {
 		return nil, err
 	}
@@ -144,13 +150,19 @@ func (r RedHat9) InstanceType(region string, instanceSize e2e.InstanceSize, comp
 	return getInstanceTypeFromRegionAndArch(region, r.architecture, instanceSize, computeType)
 }
 
-func (r RedHat9) AMIName(ctx context.Context, awsConfig aws.Config) (string, error) {
+func (r RedHat9) AMIName(ctx context.Context, awsConfig aws.Config, _ string) (string, error) {
 	// there is no rhel ssm parameter
 	// aws ec2 describe-images --owners 309956199498 --query 'sort_by(Images, &CreationDate)[-1].[ImageId]' --filters "Name=name,Values=RHEL-9*" "Name=architecture,Values=x86_64" --region us-west-2
 	return findLatestImage(ctx, ec2.NewFromConfig(awsConfig), "RHEL-9*", r.amiArchitecture)
 }
 
 func (r RedHat9) BuildUserData(userDataInput e2e.UserDataInput) ([]byte, error) {
+	nodeadmConfigYaml, err := generateNodeadmConfigYaml(userDataInput.NodeadmConfig)
+	if err != nil {
+		return nil, err
+	}
+	userDataInput.NodeadmConfigYaml = nodeadmConfigYaml
+
 	if err := populateBaseScripts(&userDataInput); err != nil {
 		return nil, err
 	}
@@ -244,9 +256,4 @@ func paginationDone(in *ec2.DescribeImagesInput, out *ec2.DescribeImagesOutput) 
 	// This function helps go through all the pages to make sure if filtered
 	// result shows up in any one of the pages
 	return out.NextToken == nil || (in.NextToken != nil && in.NextToken == out.NextToken)
-}
-
-// IsRHEL8 returns true if the given name is a RHEL 8 OS name.
-func IsRHEL8(name string) bool {
-	return strings.HasPrefix(name, "rhel8")
 }

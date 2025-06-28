@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 )
 
@@ -14,6 +15,10 @@ func CreateRouteForCIDRToInstance(ctx context.Context, client *ec2.Client, route
 		RouteTableId:         aws.String(routeTableID),
 		DestinationCidrBlock: aws.String(cidr),
 		InstanceId:           aws.String(instanceID),
+	}, func(o *ec2.Options) {
+		// adding routes occasionally fails with instance state "unknown-running"
+		// retrying this error to allow for any async route table/instance state changes to complete
+		o.Retryer = retry.AddWithErrorCodes(o.Retryer, "IncorrectInstanceState")
 	})
 	if err != nil {
 		return fmt.Errorf("could not create route to instance %s for dst CIDR %s: %w", instanceID, cidr, err)

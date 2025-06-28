@@ -51,6 +51,10 @@ Parameters:
     Type: String
     Description: Path prefix for the IAM roles
 
+  LogCollectorScript:
+    Type: String
+    Description: The log collector script content
+
   CreationTime:
     Type: String
     Description: Creation time of the stack to tag the VPC
@@ -532,6 +536,8 @@ Resources:
         Fn::Base64:
           Fn::Base64: !Sub |
             #cloud-config
+            packages:
+              - rsyslog
             write_files:
               - content: |
                   Host *
@@ -550,7 +556,12 @@ Resources:
                   chmod 0600 /root/.ssh/id_rsa
                 path: /root/download-private-key.sh
                 permissions: "0755"
+              - content: |
+                  ${LogCollectorScript}
+                path: /tmp/log-collector.sh
+                permissions: "0755"
             runcmd:
+              - systemctl enable rsyslog --now
               - cfn-signal --stack ${AWS::StackName} --resource Jumpbox --region ${AWS::Region}
 
   PodIdentityS3Bucket:

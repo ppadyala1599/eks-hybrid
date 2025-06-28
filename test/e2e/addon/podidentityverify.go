@@ -21,7 +21,6 @@ import (
 
 const (
 	getAddonTimeout           = 10 * time.Minute
-	podIdentityDaemonSet      = "eks-pod-identity-agent-hybrid"
 	podIdentityToken          = "eks-pod-identity-token"
 	policyName                = "pod-identity-association-role-policy"
 	PodIdentityS3BucketPrefix = "podid"
@@ -66,18 +65,14 @@ func (v VerifyPodIdentityAddon) Run(ctx context.Context) error {
 		return fmt.Errorf("waiting for pod identity add-on to be active: %w", err)
 	}
 
-	v.Logger.Info("Check if daemon set exists", "daemonSet", podIdentityDaemonSet)
-	if _, err := kubernetes.GetDaemonSet(ctx, v.Logger, v.K8S, "kube-system", podIdentityDaemonSet); err != nil {
-		return fmt.Errorf("getting daemon set %s: %w", podIdentityDaemonSet, err)
-	}
-
 	node, err := kubernetes.WaitForNode(ctx, v.K8S, v.NodeName, v.Logger)
 	if err != nil {
 		return fmt.Errorf("waiting for node %s to be ready: %w", v.NodeName, err)
 	}
 
-	if err := kubernetes.WaitForDaemonSetPodToBeRunning(ctx, v.K8S, "kube-system", podIdentityDaemonSet, node.Name, v.Logger); err != nil {
-		return fmt.Errorf("waiting for pod identity daemon set to be running on pod: %w", err)
+	v.Logger.Info("Looking for pod identity pod on target node", "nodeName", node.Name)
+	if err := v.waitForPodIdentityPodOnNode(ctx, node.Name); err != nil {
+		return fmt.Errorf("waiting for pod identity pod to be running on node %s: %w", node.Name, err)
 	}
 
 	podName := fmt.Sprintf("awscli-%s", node.Name)
@@ -92,6 +87,14 @@ func (v VerifyPodIdentityAddon) Run(ctx context.Context) error {
 				{
 					Name:  podName,
 					Image: fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com/ecr-public/aws-cli/aws-cli:latest", constants.EcrAccounId, v.Region),
+					Env: []corev1.EnvVar{
+						// default value for AWS_MAX_ATTEMPTS is 3. We are seeing the s3 cp command
+						// fail due to rate limits form additional tests so increasing the number of retries
+						{
+							Name:  "AWS_MAX_ATTEMPTS",
+							Value: "10",
+						},
+					},
 					Command: []string{
 						"/bin/bash",
 						"-c",
@@ -146,4 +149,15 @@ func (v VerifyPodIdentityAddon) Run(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (v VerifyPodIdentityAddon) waitForPodIdentityPodOnNode(ctx context.Context, nodeName string) error {
+	v.Logger.Info("Waiting for pod identity pod on node", "nodeName", nodeName)
+
+	listOptions := metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/instance=eks-pod-identity-agent",
+		FieldSelector: fmt.Sprintf("spec.nodeName=%s", nodeName),
+	}
+
+	return kubernetes.WaitForPodsToBeRunning(ctx, v.K8S, listOptions, "kube-system", v.Logger)
 }

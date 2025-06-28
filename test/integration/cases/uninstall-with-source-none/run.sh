@@ -5,6 +5,7 @@ set -o nounset
 set -o pipefail
 
 source /helpers.sh
+source /test-constants.sh
 
 mock::aws
 wait::dbus-ready
@@ -13,7 +14,7 @@ mkdir -p /etc/iam/pki
 touch /etc/iam/pki/server.pem
 touch /etc/iam/pki/server.key
 
-nodeadm install 1.30 --credential-provider iam-ra --containerd-source none
+nodeadm install $CURRENT_VERSION --credential-provider iam-ra --containerd-source none
 assert::files-equal /opt/nodeadm/tracker expected-nodeadm-tracker
 
 # mock iam-ra update service credentials file
@@ -27,7 +28,7 @@ assert::path-exists /usr/bin/containerd
 # run a second test that removes the containerd from the tracker file to
 # simulate older installations which would not have included none in the source
 # to ensure during unmarshal it defaults to none
-nodeadm install 1.30 --credential-provider iam-ra --containerd-source none
+nodeadm install $CURRENT_VERSION --credential-provider iam-ra --containerd-source none
 yq -i '.Artifacts.Containerd = ""' /opt/nodeadm/tracker
 
 # mock iam-ra update service credentials file

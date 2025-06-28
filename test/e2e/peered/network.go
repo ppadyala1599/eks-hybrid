@@ -26,8 +26,12 @@ type Network struct {
 }
 
 // CreateRoutesForNode creates routes in the VPC route table for the node's pod CIDRs.
-func (n *Network) CreateRoutesForNode(ctx context.Context, peerdNode *PeerdNode) error {
-	node, err := kubernetes.CheckForNodeWithE2ELabel(ctx, n.K8s, peerdNode.Name)
+func (n *Network) CreateRoutesForNode(ctx context.Context, peeredInstance *PeeredInstance) error {
+	if err := ec2.DisableSourceDestCheck(ctx, n.EC2, peeredInstance.ID); err != nil {
+		return fmt.Errorf("disabling source/dest check: %w", err)
+	}
+
+	node, err := kubernetes.CheckForNodeWithE2ELabel(ctx, n.K8s, peeredInstance.Name)
 	if err != nil {
 		return fmt.Errorf("reading node: %w", err)
 	}
@@ -37,14 +41,14 @@ func (n *Network) CreateRoutesForNode(ctx context.Context, peerdNode *PeerdNode)
 		return fmt.Errorf("getting node pod CIDRs: %w", err)
 	}
 
-	if err := n.addRoutesForCIDRs(ctx, peerdNode.Instance, podCIDRs); err != nil {
+	if err := n.addRoutesForCIDRs(ctx, peeredInstance, podCIDRs); err != nil {
 		return fmt.Errorf("adding routes for node pod CIDRs: %w", err)
 	}
 
 	return nil
 }
 
-func (n *Network) addRoutesForCIDRs(ctx context.Context, instance ec2.Instance, cidrs []string) error {
+func (n *Network) addRoutesForCIDRs(ctx context.Context, instance *PeeredInstance, cidrs []string) error {
 	resp, err := n.EC2.DescribeRouteTables(ctx, &ec2sdk.DescribeRouteTablesInput{
 		Filters: []types.Filter{
 			{

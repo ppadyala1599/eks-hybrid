@@ -4,7 +4,8 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-declare SUPPORTED_VERSIONS=(1.27 1.28 1.29 1.30 1.31)
+source /helpers.sh
+source /test-constants.sh
 
 for VERSION in ${SUPPORTED_VERSIONS}
 do
