@@ -1,0 +1,9 @@
+clusterName: nodeadm-e2e-tests-1-31
+clusterRegion: us-west-2
+nodeadmUrlAMD: https://hybrid-assets.eks.amazonaws.com/releases/latest/bin/linux/amd64/nodeadm
+nodeadmUrlARM: https://hybrid-assets.eks.amazonaws.com/releases/latest/bin/linux/arm64/nodeadm
+setRootPassword: false
+nodeK8SVersion: ""
+logsBucket: ""
+endpoint: ""
+artifactsFolder: /Volumes/workplace/eks-hybrid/artifacts

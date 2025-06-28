@@ -1,0 +1,18 @@
+clusterName: nodeadm-e2e-tests-1-31
+clusterRegion: us-west-2
+clusterNetwork:
+  vpcCidr: 10.0.0.0/16
+  publicSubnetCidr: 10.0.10.0/24
+  privateSubnetCidr: 10.0.20.0/24
+  podCidr: ""
+hybridNetwork:
+  vpcCidr: 10.1.0.0/16
+  publicSubnetCidr: 10.1.1.0/24
+  privateSubnetCidr: 10.1.2.0/24
+  podCidr: 10.2.0.0/16
+kubernetesVersion: "1.31"
+cni: cilium
+eks:
+  endpoint: ""
+  clusterRoleSP: eks.amazonaws.com
+  podIdentitySP: pods.eks.amazonaws.com
