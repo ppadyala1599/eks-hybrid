@@ -2,6 +2,7 @@ package hybrid
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/eks/types"
@@ -12,11 +13,13 @@ import (
 	"github.com/aws/eks-hybrid/internal/daemon"
 	"github.com/aws/eks-hybrid/internal/kubelet"
 	"github.com/aws/eks-hybrid/internal/nodeprovider"
+	"github.com/aws/eks-hybrid/internal/validation"
 )
 
 const (
 	nodeIpValidation      = "node-ip-validation"
 	kubeletCertValidation = "kubelet-cert-validation"
+	kubeletVersionSkew    = "kubelet-version-skew-validation"
 )
 
 type HybridNodeProvider struct {
@@ -31,6 +34,7 @@ type HybridNodeProvider struct {
 	// CertPath is the path to the kubelet certificate
 	// If not provided, defaults to kubelet.KubeletCurrentCertPath
 	certPath string
+	kubelet  Kubelet
 }
 
 type NodeProviderOpt func(*HybridNodeProvider)
@@ -42,6 +46,7 @@ func NewHybridNodeProvider(nodeConfig *api.NodeConfig, skipPhases []string, logg
 		skipPhases: skipPhases,
 		network:    &defaultKubeletNetwork{},
 		certPath:   kubelet.KubeletCurrentCertPath,
+		kubelet:    kubelet.New(),
 	}
 	np.withHybridValidators()
 	if err := np.withDaemonManager(); err != nil {
@@ -82,6 +87,13 @@ func WithCertPath(path string) NodeProviderOpt {
 	}
 }
 
+// WithKubelet adds a kubelet struct to the HybridNodeProvider for testing purposes.
+func WithKubelet(kubelet Kubelet) NodeProviderOpt {
+	return func(hnp *HybridNodeProvider) {
+		hnp.kubelet = kubelet
+	}
+}
+
 func (hnp *HybridNodeProvider) GetNodeConfig() *api.NodeConfig {
 	return hnp.nodeConfig
 }
@@ -99,14 +111,22 @@ func (hnp *HybridNodeProvider) Validate() error {
 
 	if !slices.Contains(hnp.skipPhases, kubeletCertValidation) {
 		hnp.logger.Info("Validating kubelet certificate...")
-		if err := ValidateKubeletCert(hnp.certPath, hnp.nodeConfig.Spec.Cluster.CertificateAuthority); err != nil {
+		if err := ValidateCertificate(hnp.certPath, hnp.nodeConfig.Spec.Cluster.CertificateAuthority); err != nil {
 			// Ignore date validation errors in the hybrid provider since kubelet will regenerate them
 			// Ignore no cert errors since we expect it to not exist
 			if IsDateValidationError(err) || IsNoCertError(err) {
 				return nil
 			}
 
-			return err
+			return AddKubeletRemediation(hnp.certPath, err)
+		}
+	}
+
+	if !slices.Contains(hnp.skipPhases, kubeletVersionSkew) {
+		if err := hnp.ValidateKubeletVersionSkew(); err != nil {
+			return validation.WithRemediation(err,
+				"Ensure the hybrid node's Kubernetes version follows the version skew policy of the EKS cluster. "+
+					"Update the node's Kubernetes components using 'nodeadm upgrade' or reinstall with a compatible version. https://kubernetes.io/releases/version-skew-policy/#kubelet")
 		}
 	}
 
@@ -131,4 +151,26 @@ func (hnp *HybridNodeProvider) getCluster(ctx context.Context) (*types.Cluster, 
 	hnp.cluster = cluster
 
 	return cluster, nil
+}
+
+// AddKubeletRemediation adds kubelet-specific remediation messages based on error type
+func AddKubeletRemediation(certPath string, err error) error {
+	errWithContext := fmt.Errorf("validating kubelet certificate: %w", err)
+
+	switch err.(type) {
+	case *CertNotFoundError, *CertFileError, *CertReadError:
+		return validation.WithRemediation(errWithContext, "Kubelet certificate will be created when the kubelet is able to authenticate with the API server. Check previous authentication remediation advice.")
+	case *CertInvalidFormatError:
+		return validation.WithRemediation(errWithContext, fmt.Sprintf("Delete the kubelet server certificate file %s and restart kubelet", certPath))
+	case *CertClockSkewError:
+		return validation.WithRemediation(errWithContext, "Verify the system time is correct and restart the kubelet.")
+	case *CertExpiredError:
+		return validation.WithRemediation(errWithContext, fmt.Sprintf("Delete the kubelet server certificate file %s and restart kubelet. Validate `serverTLSBootstrap` is true in the kubelet config /etc/kubernetes/kubelet/config.json to automatically rotate the certificate.", certPath))
+	case *CertParseCAError:
+		return validation.WithRemediation(errWithContext, "Ensure the cluster CA certificate is valid")
+	case *CertInvalidCAError:
+		return validation.WithRemediation(errWithContext, fmt.Sprintf("Please remove the kubelet server certificate file %s or use \"--skip %s\" if this is expected", certPath, kubeletCertValidation))
+	}
+
+	return errWithContext
 }

@@ -100,7 +100,7 @@ func (c *command) Run(log *zap.Logger, opts *cli.GlobalOptions) error {
 
 	log.Info("Validating Kubernetes version", zap.Reflect("kubernetes version", c.kubernetesVersion))
 	// Create a Source for all AWS managed artifacts.
-	awsSource, err := aws.GetLatestSource(ctx, c.kubernetesVersion)
+	awsSource, err := aws.GetLatestSource(ctx, c.kubernetesVersion, c.region)
 	if err != nil {
 		return err
 	}

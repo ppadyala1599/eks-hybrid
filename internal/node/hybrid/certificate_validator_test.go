@@ -49,7 +49,7 @@ func TestValidateKubeletCert(t *testing.T) {
 			name:          "wrong CA",
 			cert:          test.GenerateKubeletCert(g, wrongCA, wrongCAKey, time.Now(), time.Now().AddDate(10, 0, 0)),
 			ca:            caBytes,
-			expectedError: "kubelet certificate is not valid for the current cluster",
+			expectedError: "certificate is not valid for the current cluster",
 		},
 		{
 			name:          "skip validation",
@@ -60,7 +60,7 @@ func TestValidateKubeletCert(t *testing.T) {
 		},
 		{
 			name:          "stat error",
-			expectedError: "reading kubelet certificate",
+			expectedError: "reading certificate",
 			setup: func(tempDir string) error {
 				// Create a directory with the same name as the cert file to cause a stat error
 				certPath := filepath.Join(tempDir, kubelet.KubeletCurrentCertPath)
@@ -71,7 +71,7 @@ func TestValidateKubeletCert(t *testing.T) {
 			name:          "invalid cert format",
 			cert:          []byte("invalid pem data"),
 			ca:            caBytes,
-			expectedError: "parsing kubelet certificate",
+			expectedError: "parsing certificate",
 		},
 		{
 			name:          "invalid CA format",
@@ -121,6 +121,92 @@ func TestValidateKubeletCert(t *testing.T) {
 			} else {
 				g.Expect(err).To(MatchError(ContainSubstring(tt.expectedError)))
 			}
+		})
+	}
+}
+
+func TestDateValidationError(t *testing.T) {
+	g := NewGomegaWithT(t)
+
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "clock skew error",
+			err:      &CertClockSkewError{baseError{message: "cert not yet valid"}},
+			expected: true,
+		},
+		{
+			name:     "expired error",
+			err:      &CertExpiredError{baseError{message: "cert expired"}},
+			expected: true,
+		},
+		{
+			name:     "not found error",
+			err:      &CertNotFoundError{baseError{message: "cert not found"}},
+			expected: false,
+		},
+		{
+			name:     "file error",
+			err:      &CertFileError{baseError{message: "file error"}},
+			expected: false,
+		},
+		{
+			name:     "nil error",
+			err:      nil,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := IsDateValidationError(tt.err)
+			g.Expect(result).To(Equal(tt.expected))
+		})
+	}
+}
+
+func TestNoCertError(t *testing.T) {
+	g := NewGomegaWithT(t)
+
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "not found error",
+			err:      &CertNotFoundError{baseError{message: "cert not found"}},
+			expected: true,
+		},
+		{
+			name:     "clock skew error",
+			err:      &CertClockSkewError{baseError{message: "cert not yet valid"}},
+			expected: false,
+		},
+		{
+			name:     "expired error",
+			err:      &CertExpiredError{baseError{message: "cert expired"}},
+			expected: false,
+		},
+		{
+			name:     "file error",
+			err:      &CertFileError{baseError{message: "file error"}},
+			expected: false,
+		},
+		{
+			name:     "nil error",
+			err:      nil,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := IsNoCertError(tt.err)
+			g.Expect(result).To(Equal(tt.expected))
 		})
 	}
 }

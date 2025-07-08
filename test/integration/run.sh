@@ -24,7 +24,14 @@ fi
 
 FAILED="false"
 
-for CASE_DIR in $(find test/integration/cases -maxdepth 1 -mindepth 1 -name "$TEST_FILTER"); do
+CASES=$(find test/integration/cases -maxdepth 1 -mindepth 1 -name "$TEST_FILTER")
+if [ -z "$CASES" ]; then
+  echo "No test case found for filter $TEST_FILTER"
+  echo "❌ No tests ran!"
+  exit 1
+fi
+
+for CASE_DIR in $CASES; do
   CASE_NAME=$(basename $CASE_DIR)
   printf "🧪 Testing $CASE_NAME..."
   CONTAINER_ID=$(docker run \

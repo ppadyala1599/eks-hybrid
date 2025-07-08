@@ -37,14 +37,19 @@ func (s *swapAspect) Name() string {
 }
 
 func (s *swapAspect) Setup() error {
-	hasSwapPartition, err := partitionSwapExists()
+	swapfiles, err := getSwapfilePaths()
+	if err != nil {
+		return err
+	}
+
+	hasSwapPartition, err := partitionSwapExists(swapfiles)
 	if err != nil {
 		return err
 	}
 	if hasSwapPartition {
 		return fmt.Errorf("failed to disable swap: partition type swap found on the host")
 	}
-	if err = s.swapOff(); err != nil {
+	if err = s.swapOff(swapfiles); err != nil {
 		return err
 	}
 	return disableSwapOnFstab()
@@ -55,11 +60,7 @@ func (s *swapAspect) Setup() error {
 // can only temporarily disable the swap, and swap will come back after host reboot.
 // If partition type swap exists, user needs to manually remove the partition swap before
 // running nodeadm init.
-func partitionSwapExists() (bool, error) {
-	swapfiles, err := getSwapfilePaths()
-	if err != nil {
-		return false, err
-	}
+func partitionSwapExists(swapfiles []*swap) (bool, error) {
 	for _, swap := range swapfiles {
 		if swap.swapType == swapTypePartition {
 			return true, nil
@@ -68,11 +69,7 @@ func partitionSwapExists() (bool, error) {
 	return false, nil
 }
 
-func (s *swapAspect) swapOff() error {
-	swapfiles, err := getSwapfilePaths()
-	if err != nil {
-		return err
-	}
+func (s *swapAspect) swapOff(swapfiles []*swap) error {
 	for _, swap := range swapfiles {
 		path := swap.filePath
 		if swap.swapType == swapTypePartition {
@@ -102,8 +99,12 @@ func (s *swapAspect) swapOff() error {
 // Filename                          Type         Size     Used    Priority
 // <path-to-swap-file>   	     file/partition   524280   0       -1
 func getSwapfilePaths() ([]*swap, error) {
+	activeSwapAreasFile := os.Getenv("ACTIVE_SWAP_AREAS")
+	if activeSwapAreasFile == "" {
+		activeSwapAreasFile = "/proc/swaps"
+	}
 	var paths []*swap
-	file, err := os.OpenFile("/proc/swaps", os.O_RDONLY, 0o444)
+	file, err := os.OpenFile(activeSwapAreasFile, os.O_RDONLY, 0o444)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return paths, nil

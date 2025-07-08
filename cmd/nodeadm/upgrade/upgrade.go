@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/integrii/flaggy"
 	"go.uber.org/zap"
 	"k8s.io/utils/strings/slices"
 
+	initCmd "github.com/aws/eks-hybrid/cmd/nodeadm/init"
 	"github.com/aws/eks-hybrid/internal/aws"
 	"github.com/aws/eks-hybrid/internal/cli"
 	"github.com/aws/eks-hybrid/internal/creds"
@@ -27,6 +29,21 @@ const (
 	skipNodePreflightCheck = "node-validation"
 	initNodePreflightCheck = "init-validation"
 )
+
+func upgradePhases() []string {
+	// Start with init phases
+	phases := initCmd.Phases()
+
+	// Add upgrade-specific phases
+	upgradePhases := []string{
+		"init-validation",
+		"pod-validation",
+		"node-validation",
+	}
+
+	phases = append(phases, upgradePhases...)
+	return phases
+}
 
 const upgradeHelpText = `Examples:
   # Upgrade all components
@@ -48,7 +65,7 @@ func NewUpgradeCommand() cli.Command {
 	fc.AdditionalHelpAppend = upgradeHelpText
 	fc.AddPositionalValue(&cmd.kubernetesVersion, "KUBERNETES_VERSION", 1, true, "The major[.minor[.patch]] version of Kubernetes to install.")
 	fc.String(&cmd.configSource, "c", "config-source", "Source of node configuration. The format is a URI with supported schemes: [file, imds].")
-	fc.StringSlice(&cmd.skipPhases, "s", "skip", "Phases of the upgrade to skip. Allowed values: [init-validation, pod-validation, node-validation, node-ip-validation].")
+	fc.StringSlice(&cmd.skipPhases, "s", "skip", fmt.Sprintf("Phases of the upgrade to skip. Allowed values: [%s].", strings.Join(upgradePhases(), ", ")))
 	fc.Duration(&cmd.timeout, "t", "timeout", "Maximum upgrade command duration. Input follows duration format. Example: 1h23s")
 	cmd.flaggy = fc
 	return &cmd
@@ -114,10 +131,14 @@ func (c *command) Run(log *zap.Logger, opts *cli.GlobalOptions) error {
 		return err
 	}
 
-	credsProvider, err := creds.GetCredentialProviderFromNodeConfig(nodeProvider.GetNodeConfig())
+	nodeConfig := nodeProvider.GetNodeConfig()
+
+	credsProvider, err := creds.GetCredentialProviderFromNodeConfig(nodeConfig)
 	if err != nil {
 		return err
 	}
+
+	region := nodeConfig.Spec.Cluster.Region
 
 	// Validating credential provider. Upgrade does not allow changes to credential providers
 	installedCredsProvider, err := creds.GetCredentialProviderFromInstalledArtifacts(installed.Artifacts)
@@ -130,7 +151,7 @@ func (c *command) Run(log *zap.Logger, opts *cli.GlobalOptions) error {
 
 	log.Info("Validating Kubernetes version", zap.Reflect("kubernetes version", c.kubernetesVersion))
 	// Create a Source for all AWS managed artifacts.
-	awsSource, err := aws.GetLatestSource(ctx, c.kubernetesVersion)
+	awsSource, err := aws.GetLatestSource(ctx, c.kubernetesVersion, region)
 	if err != nil {
 		return err
 	}
