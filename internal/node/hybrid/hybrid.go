@@ -13,6 +13,7 @@ import (
 	"github.com/aws/eks-hybrid/internal/daemon"
 	"github.com/aws/eks-hybrid/internal/kubelet"
 	"github.com/aws/eks-hybrid/internal/nodeprovider"
+	"github.com/aws/eks-hybrid/internal/system"
 	"github.com/aws/eks-hybrid/internal/validation"
 )
 
@@ -20,6 +21,7 @@ const (
 	nodeIpValidation      = "node-ip-validation"
 	kubeletCertValidation = "kubelet-cert-validation"
 	kubeletVersionSkew    = "kubelet-version-skew-validation"
+	ntpSyncValidation     = "ntp-sync-validation"
 )
 
 type HybridNodeProvider struct {
@@ -127,6 +129,14 @@ func (hnp *HybridNodeProvider) Validate() error {
 			return validation.WithRemediation(err,
 				"Ensure the hybrid node's Kubernetes version follows the version skew policy of the EKS cluster. "+
 					"Update the node's Kubernetes components using 'nodeadm upgrade' or reinstall with a compatible version. https://kubernetes.io/releases/version-skew-policy/#kubelet")
+		}
+	}
+
+	if !slices.Contains(hnp.skipPhases, ntpSyncValidation) {
+		hnp.logger.Info("Validating NTP synchronization...")
+		ntpValidator := system.NewNTPValidator(hnp.logger)
+		if err := ntpValidator.Validate(); err != nil {
+			return err
 		}
 	}
 

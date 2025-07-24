@@ -19,7 +19,7 @@ import (
 
 func main() {
 	flaggy.SetName("nodeadm")
-	flaggy.SetDescription("From zero to Node faster than you can say Elastic Kubernetes Service")
+	flaggy.SetDescription("Amazon EKS Hybrid Nodes CLI")
 	flaggy.SetVersion(version.GitVersion)
 	flaggy.DefaultParser.AdditionalHelpPrepend = "http://github.com/aws/eks-hybrid"
 	flaggy.DefaultParser.AdditionalHelpAppend = "Documentation:\n  https://docs.aws.amazon.com/eks/latest/userguide/hybrid-nodes-nodeadm.html"

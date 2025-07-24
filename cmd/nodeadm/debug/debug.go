@@ -93,10 +93,11 @@ func (c *debug) Run(log *zap.Logger, opts *cli.GlobalOptions) error {
 	runner := validation.NewRunner[*api.NodeConfig](printer)
 	apiServerValidator := node.NewAPIServerValidator(kubelet.New())
 	clusterProvider := kubernetes.NewClusterProvider(awsConfig)
-	swapValidator := system.NewSwapValidator(log)
 	runner.Register(creds.Validations(awsConfig, nodeConfig)...)
 	runner.Register(
-		validation.New("swap", swapValidator.Run),
+		validation.New("ntp-sync", system.NewNTPValidator(log).Run),
+		validation.New("swap", system.NewSwapValidator(log).Run),
+		validation.New("ulimit", system.NewUlimitValidator().Run),
 		validation.New("aws-auth", sts.NewAuthenticationValidator(awsConfig).Run),
 		runner.UntilError(
 			validation.New("k8s-endpoint-network", kubernetes.NewAccessValidator(clusterProvider).Run),

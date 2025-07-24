@@ -24,11 +24,16 @@ func NewSwapValidator(logger *zap.Logger) *SwapValidator {
 
 // Run validates the swap configuration
 func (v *SwapValidator) Run(ctx context.Context, informer validation.Informer, nodeConfig *api.NodeConfig) error {
-	informer.Starting(ctx, "swap", "Checking swap configuration...")
+	var err error
+	informer.Starting(ctx, "swap", "Validating swap configuration")
+	defer func() {
+		informer.Done(ctx, "swap", err)
+	}()
+	if err = v.Validate(); err != nil {
+		return err
+	}
 
-	err := v.Validate()
-	informer.Done(ctx, "swap", err)
-	return err
+	return nil
 }
 
 // Validate performs the swap validation
