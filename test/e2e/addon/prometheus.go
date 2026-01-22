@@ -40,6 +40,8 @@ func (p *PrometheusNodeExporterTest) Create(ctx context.Context) error {
 		Cluster:   p.Cluster,
 		Namespace: prometheusNamespace,
 		Name:      prometheusName,
+		// TODO: Remove version pinning once prometheus-node-exporter addon releases a version supporting K8s 1.35
+		Version: "v1.10.2-eksbuild.6",
 	}
 
 	if err := p.addon.CreateAndWaitForActive(ctx, p.EKSClient, p.K8S, p.Logger); err != nil {

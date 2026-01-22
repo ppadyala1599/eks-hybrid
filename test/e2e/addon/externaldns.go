@@ -66,9 +66,11 @@ func (e *ExternalDNSTest) Create(ctx context.Context) error {
 
 	configuration := fmt.Sprintf(`{"domainFilters": ["%s"], "policy": "sync"}`, *hostedZoneName)
 	e.addon = &Addon{
-		Cluster:       e.Cluster,
-		Namespace:     externalDNSNamespace,
-		Name:          externalDNS,
+		Cluster:   e.Cluster,
+		Namespace: externalDNSNamespace,
+		Name:      externalDNS,
+		// TODO: Remove version pinning once external-dns addon releases a version supporting K8s 1.35
+		Version:       "v0.20.0-eksbuild.2",
 		Configuration: configuration,
 		PodIdentityAssociations: []PodIdentityAssociation{
 			{
