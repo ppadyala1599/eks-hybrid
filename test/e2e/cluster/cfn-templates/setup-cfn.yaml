@@ -229,6 +229,7 @@ Resources:
   HybridNodeVPCPublicSubnet:
     Type: AWS::EC2::Subnet
     Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
       CidrBlock: !Ref HybridNodePublicSubnetCidr
       MapPublicIpOnLaunch: true
       Tags:
@@ -518,7 +519,7 @@ Resources:
     Properties:
       LaunchTemplateName: !Sub "${AWS::StackName}-jumpbox-template"
       LaunchTemplateData:
-        ImageId: resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+        ImageId: resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
         IamInstanceProfile:
           Arn: !GetAtt JumpboxInstanceProfile.Arn
         SecurityGroupIds:
@@ -579,8 +580,8 @@ Resources:
             LaunchTemplateId: !Ref JumpboxLaunchTemplate
             Version: !GetAtt JumpboxLaunchTemplate.LatestVersionNumber
           Overrides:
-            # use t4g.micro if available, otherwise try other instance types
-            - InstanceType: t4g.micro
+            # use t3.micro if available, otherwise try other instance types
+            - InstanceType: t3.micro
               SubnetId: !Ref HybridNodeVPCPublicSubnet
               Priority: 1
             - InstanceType: t4g.small
